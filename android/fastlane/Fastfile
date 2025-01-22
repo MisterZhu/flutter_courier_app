@@ -1,0 +1,144 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+# default_platform(:android)
+
+# platform :android do
+#   desc "Runs all the tests"
+#   lane :test do
+#     gradle(task: "test")
+#   end
+
+#   desc "Submit a new Beta Build to Crashlytics Beta"
+#   lane :beta do
+#     gradle(task: "clean assembleRelease")
+#     crashlytics
+  
+#     # sh "your_script.sh"
+#     # You can also use other beta testing services here
+#   end
+
+#   desc "Deploy a new version to the Google Play"
+#   lane :deploy do
+#     gradle(task: "clean assembleRelease")
+#     upload_to_play_store
+#   end
+# end
+
+require 'fileutils'
+
+default_platform(:android)
+
+platform :android do
+  desc "Build android"
+
+  lane :build_and_export_apk do |options|
+
+    # 获取构建类型
+    build_type = options[:build_type]
+    UI.success("当前构建类型: $#{build_type}")
+
+    # android项目根路径
+    project_path = ".."
+    # 定义Android构建的目录
+    build_apk_path="../../build/app/outputs/flutter-apk/"
+    # 定义Android导出目录
+    output_path = "/Users/edy/Desktop/jenkins_mobile_output/courier_app/fastlane_output/android/#{build_type}/"
+    # app名称
+    app_name = "Buffalo Driver"
+
+    # 根据当前构建类型动态配置
+    # 应用名称如果有需要也可依据构建类型进行切换
+    case build_type
+      when "alpha"
+        package_name = "com.buffaloex.courier.alpha"
+      when "beta"
+        package_name = "com.buffaloex.courier"
+      when "release"
+        package_name = "com.buffaloex.courier"
+      else
+        UI.user_error!("Invalid build_type specified")
+    end
+
+    # 修改包名应用名, app_name如果带有空格需要将其转成字符串传入
+    sh("bash modify_package_name.sh #{project_path} #{package_name} '#{app_name}'")
+    
+    is_alpha = build_type == "alpha"
+    # 动态修改图标, 非release构建模式添加alpha标志
+    add_badge(
+      alpha: is_alpha,
+      glob: "/./app/src/main/res/mipmap-*/ic_launcher.{png,PNG}",
+    )
+
+    # 构建打包
+    sh("flutter build apk --release")
+
+    # 确保目标文件夹存在，如果不存在则创建
+    FileUtils.mkdir_p(output_path) unless Dir.exist?(output_path)
+
+    # 获取当前日期和时间
+    current_time = Time.now
+    formatted_time = current_time.strftime("%Y-%m-%d %H.%M.%S")
+
+    # 获取原始文件路径
+    origin_file_path = "#{build_apk_path}app-release.apk"
+    # 设置导出文件的路径
+    output_file_path = "#{output_path}courier_app#{build_type}_#{formatted_time}.apk"
+
+    # 复制文件(将原始文件拷贝至目标地址)
+    FileUtils.copy(origin_file_path, output_file_path)
+
+    UI.success("Android 构建成功")
+    if build_type == "release"
+      UI.important("release模式, 请手动上传至分发平台")
+      # 打开apk所在文件夹
+      sh("open #{output_path}")
+    else 
+      UI.success("将上传至蒲公英测试分发平台")
+      # 上传至蒲公英, apk: 配置apk的文件地址, 因为没有使用fastlane进行构建, 因此需要设置apk的路径
+      pgyer(api_key: "da7d4501219b119e5fa1c74865ee4dee", apk: output_file_path)
+    end
+
+    # fastlane构建方式
+    # build_android_app(
+    #   task: "clean assembleRelease",
+    #   properties: {
+    #     "PACKAGE_NAME" => package_name,
+    #     "APP_NAME" => app_name
+    #     "android.injected.signing.store.file" => "../Buffalo_Keystore.jks",
+    #     "android.injected.signing.store.password" => "Buffalo123456",
+    #     "android.injected.signing.key.alias" => "Buffalo",
+    #     "android.injected.signing.key.password" => "Buffalo123456",
+    #   }
+    # )
+
+  end
+
+  # 仅当上述流程全部执行成功后才会走这里
+  after_all do |lane|
+    # slack(
+    #   message: "Successfully deployed new App Update."
+    # )
+  end
+
+  # 如果流程发生异常会走这里并终止
+  error do |lane, exception|
+    # slack(
+    #   message: exception.message,
+    #   success: false
+    # )
+  end
+
+end
